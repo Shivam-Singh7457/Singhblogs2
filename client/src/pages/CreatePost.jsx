@@ -1,86 +1,65 @@
-import {
-  Alert,
-  Button,
-  FileInput,
-  Select,
-  TextInput
-} from 'flowbite-react';
-import ReactQuill from 'react-quill';
-import 'react-quill/dist/quill.snow.css';
-import {
-  getDownloadURL,
-  getStorage,
-  ref,
-  uploadBytesResumable
-} from 'firebase/storage';
-import { app } from '../firebase';
-import { useState } from 'react';
-import { CircularProgressbar } from 'react-circular-progressbar';
-import 'react-circular-progressbar/dist/styles.css';
+import React, { useEffect, useState } from 'react';
+import { Button, FileInput, Select, TextInput } from 'flowbite-react';
+import { useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
-import { useSelector } from 'react-redux'; // ✅ import for token access
 
 export default function CreatePost() {
-  const [file, setFile] = useState(null);
+  const { currentUser } = useSelector((state) => state.user);
+  const [image, setImage] = useState(null);
   const [imageUploadProgress, setImageUploadProgress] = useState(null);
   const [imageUploadError, setImageUploadError] = useState(null);
   const [formData, setFormData] = useState({});
   const [publishError, setPublishError] = useState(null);
-
   const navigate = useNavigate();
-  const { currentUser } = useSelector((state) => state.user); // ✅ token
 
-  const handleUpdloadImage = async () => {
-    try {
-      if (!file) {
-        setImageUploadError('Please select an image');
-        return;
+  useEffect(() => {
+    if (image) {
+      uploadImage();
+    }
+  }, [image]);
+
+  const uploadImage = async () => {
+    setImageUploadError(null);
+    const storage = getStorage(app);
+    const fileName = new Date().getTime() + image.name;
+    const storageRef = ref(storage, fileName);
+    const uploadTask = uploadBytesResumable(storageRef, image);
+
+    uploadTask.on(
+      'state_changed',
+      (snapshot) => {
+        const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+        setImageUploadProgress(progress.toFixed(0));
+      },
+      (error) => {
+        setImageUploadError('Image upload failed');
+        setImageUploadProgress(null);
+      },
+      () => {
+        getDownloadURL(uploadTask.snapshot.ref).then((downloadURL) => {
+          setFormData({ ...formData, image: downloadURL });
+        });
       }
-      setImageUploadError(null);
-      const storage = getStorage(app);
-      const fileName = new Date().getTime() + '-' + file.name;
-      const storageRef = ref(storage, fileName);
-      const uploadTask = uploadBytesResumable(storageRef, file);
-      uploadTask.on(
-        'state_changed',
-        (snapshot) => {
-          const progress =
-            (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-          setImageUploadProgress(progress.toFixed(0));
-        },
-        () => {
-          setImageUploadError('Image upload failed');
-          setImageUploadProgress(null);
-        },
-        () => {
-          getDownloadURL(uploadTask.snapshot.ref).then((downloadURL) => {
-            setImageUploadProgress(null);
-            setImageUploadError(null);
-            setFormData({ ...formData, image: downloadURL });
-          });
-        }
-      );
-    } catch (error) {
-      setImageUploadError('Image upload failed');
-      setImageUploadProgress(null);
-      console.log(error);
+    );
+  };
+
+  const handleChange = (e) => {
+    if (e.target.type === 'file') {
+      setImage(e.target.files[0]);
+    } else {
+      setFormData({ ...formData, [e.target.name]: e.target.value });
     }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
-      if (!currentUser || !currentUser.token) {
-        setPublishError('You must be logged in to publish a post.');
-        return;
-      }
-
       const res = await fetch(`${import.meta.env.VITE_API_URL}/api/post/create`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${currentUser.token}`, // ✅ Include token
         },
+        credentials: 'include', // ✅ Needed to send JWT cookie
         body: JSON.stringify(formData),
       });
 
@@ -99,91 +78,66 @@ export default function CreatePost() {
   };
 
   return (
-    <div className='p-3 max-w-3xl mx-auto min-h-screen'>
-      <h1 className='text-center text-3xl my-7 font-semibold'>Create a post</h1>
-      <form className='flex flex-col gap-4' onSubmit={handleSubmit}>
-        <div className='flex flex-col gap-4 sm:flex-row justify-between'>
+    <div className="p-3 max-w-3xl mx-auto min-h-screen">
+      <h1 className="text-center text-3xl my-7 font-semibold">Create a Post</h1>
+      <form className="flex flex-col gap-4" onSubmit={handleSubmit}>
+        <TextInput
+          type="text"
+          placeholder="Title"
+          name="title"
+          required
+          onChange={handleChange}
+        />
+        <div className="flex flex-col sm:flex-row justify-between gap-4">
           <TextInput
-            type='text'
-            placeholder='Title'
+            type="text"
+            placeholder="Category (e.g., react, java)"
+            name="category"
             required
-            id='title'
-            className='flex-1'
-            onChange={(e) =>
-              setFormData({ ...formData, title: e.target.value })
-            }
+            onChange={handleChange}
           />
-          <Select
-            onChange={(e) =>
-              setFormData({ ...formData, category: e.target.value })
-            }
-          >
-            <option value='uncategorized'>Select a category</option>
-            <option value='entertainment'>Entertainment</option>
-            <option value='politics'>Politics</option>
-            <option value='sports'>Sports</option>
-            <option value='science'>Science & Tech</option>
-            <option value='news'>News</option>
-            <option value='health'>Health</option>
-            <option value='local'>Local</option>
+          <Select name="visibility" onChange={handleChange} required>
+            <option value="public">Public</option>
+            <option value="private">Private</option>
           </Select>
         </div>
 
-        <div className='flex gap-4 items-center justify-between border-4 border-teal-500 border-dotted p-3'>
-          <FileInput
-            type='file'
-            accept='image/*'
-            onChange={(e) => setFile(e.target.files[0])}
-          />
-          <Button
-            type='button'
-            gradientDuoTone='purpleToBlue'
-            size='sm'
-            outline
-            onClick={handleUpdloadImage}
-            disabled={imageUploadProgress}
-          >
-            {imageUploadProgress ? (
-              <div className='w-16 h-16'>
-                <CircularProgressbar
-                  value={imageUploadProgress}
-                  text={`${imageUploadProgress || 0}%`}
-                />
-              </div>
-            ) : (
-              'Upload Image'
-            )}
-          </Button>
-        </div>
-
-        {imageUploadError && <Alert color='failure'>{imageUploadError}</Alert>}
-
+        <FileInput
+          type="file"
+          accept="image/*"
+          onChange={handleChange}
+        />
+        {imageUploadProgress && (
+          <p className="text-sm text-slate-500">
+            Uploading: {imageUploadProgress}%
+          </p>
+        )}
+        {imageUploadError && (
+          <p className="text-sm text-red-500">{imageUploadError}</p>
+        )}
         {formData.image && (
           <img
             src={formData.image}
-            alt='upload'
-            className='w-full h-72 object-cover'
+            alt="uploaded"
+            className="w-full h-72 object-cover"
           />
         )}
-
-        <ReactQuill
-          theme='snow'
-          placeholder='Write something...'
-          className='h-72 mb-12'
+        <textarea
+          rows="10"
+          placeholder="Write something..."
+          className="w-full border p-2 rounded-md"
+          name="content"
           required
-          onChange={(value) => {
-            setFormData({ ...formData, content: value });
-          }}
+          onChange={handleChange}
         />
-
-        <Button type='submit' gradientDuoTone='purpleToPink'>
+        <Button
+          type="submit"
+          gradientDuoTone="purpleToPink"
+        >
           Publish
         </Button>
-
         {publishError && (
-          <Alert className='mt-5' color='failure'>
-            {publishError}
-          </Alert>
+          <p className="text-sm text-red-500 text-center">{publishError}</p>
         )}
       </form>
     </div>
